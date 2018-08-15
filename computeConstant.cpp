@@ -973,6 +973,10 @@ private:
             extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         }
 
+        for (int i = 0; i < glfwExtensionCount; i++) {
+            std::cout << "Exts: " << glfwExtensions[i] << std::endl;
+        }
+
         return extensions;
     }
 
