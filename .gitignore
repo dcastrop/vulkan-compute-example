@@ -1,0 +1,5 @@
+*~
+*.swp
+computeConstant
+*.spv
+.vscode
