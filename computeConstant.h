@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "utils.h"
+
 #ifdef NDEBUG
 const uint8_t enableValidationLayers = 0;
 #else
@@ -15,23 +17,6 @@ const uint8_t enableValidationLayers = 1;
 #define COMPUTE_CONSTANT_SHORT_NAME "const"
 
 #define NO_VALIDATION_LAYERS -1
-#define RUNTIME_ERROR(s)                    \
-    {                                       \
-        fprintf(stderr, "RUNTIME ERROR: "); \
-        fprintf(stderr, s);                 \
-        fprintf(stderr, "\n");              \
-        exit(EXIT_FAILURE);                 \
-    }
-
-#define SIZE(a) (sizeof(a) / sizeof(a[0]))
-#define PRINT_LIST(h, s, c, l)                  \
-    if (c > 0) {                                \
-        fprintf(h, s);                          \
-        for(uint32_t i = 0; i < c; i++){        \
-            fprintf(h, " "); fprintf(h, l[i]);  \
-        }                                       \
-        fprintf(h, "\n");                       \
-    }         
 
 const char * validationLayers[] = {
     "VK_LAYER_LUNARG_standard_validation"
@@ -207,6 +192,16 @@ typedef struct VAppState {
     VkPhysicalDevice physicalDevice;
     VkDevice device;
     VkQueue computeQueue;
+    VkDeviceSize deviceMemorySize;
+    VkDeviceMemory deviceMemory;
+    VkBuffer computeBuffer;
+    VkDescriptorSetLayout descriptorSetLayout;
+    VkPipelineLayout pipelineLayout;
+    VkPipeline computePipeline;
+    VkDescriptorPool descriptorPool;
+    VkDescriptorSet descriptorSet;
+    VkCommandPool commandPool;
+    VkCommandBuffer commandBuffer;
 } VkAppState_T;
 
 typedef VkAppState_T* VkAppState;

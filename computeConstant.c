@@ -1,7 +1,8 @@
 #include <vulkan/vulkan.h>
 
 #include "computeConstant.h"
-
+#include "fileContents.h"
+#include "utils.h"
 
 VkInstance createInstance(ExtensionInfo* extensions){
 
@@ -58,7 +59,8 @@ VkDebugUtilsMessengerEXT setupDebugCallback(VkAppState state) {
                 VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
             .pfnUserCallback = &debugCallback
         };
-        if (CreateDebugUtilsMessengerEXT(state->instance, &createInfo, NULL, &callback) != VK_SUCCESS) {
+        if (CreateDebugUtilsMessengerEXT(state->instance, &createInfo,
+            NULL, &callback) != VK_SUCCESS) {
             RUNTIME_ERROR("failed to set up debug callback!");
         }
         return callback;
@@ -68,16 +70,19 @@ QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) {
     QueueFamilyIndices indices = mkQueueFamilyIndices();
 
     uint32_t queueFamilyCount = 0;
-    vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, NULL);
+    vkGetPhysicalDeviceQueueFamilyProperties(device,
+        &queueFamilyCount, NULL);
 
     VkQueueFamilyProperties * queueFamilies = (VkQueueFamilyProperties *)
         malloc(queueFamilyCount * sizeof(VkQueueFamilyProperties));
     
-    vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies);
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount,
+        queueFamilies);
 
     for (uint32_t i = 0; i < queueFamilyCount; i++) {
         VkQueueFamilyProperties queueFamily = queueFamilies[i];
-        if (queueFamily.queueCount > 0 && queueFamily.queueFlags & VK_QUEUE_COMPUTE_BIT) {
+        if (queueFamily.queueCount > 0 &&
+            queueFamily.queueFlags & VK_QUEUE_COMPUTE_BIT) {
             indices->computeFamily = i;
         }
     
@@ -190,6 +195,7 @@ VkDevice createLogicalDevice(VkAppState state) {
     if (vkCreateDevice(physicalDevice, &createInfo, NULL, &device) != VK_SUCCESS) {
         RUNTIME_ERROR("failed to create logical device!");
     }
+    free(queueCreateInfos);
     destroyQueueFamilyIndices(indices);
     return device;
 }
@@ -203,40 +209,58 @@ VkQueue getDeviceQueue(VkAppState state){
     return computeQueue;
 }
 
-VkDeviceMemory allocateMemory(VkAppState state){
-    // Copied from https://gist.github.com/sheredom/523f02bbad2ae397d7ed255f3f3b5a7f
+uint32_t checkAll(uint32_t num_flags, const VkMemoryPropertyFlags flagList[],
+    VkMemoryPropertyFlags flags){
+    uint32_t res = 1;
+    for (uint32_t k = 0; k < num_flags; k++){
+        res = res && (flagList[k] & flags); 
+    }
+    return res;
+}
 
-    VkPhysicalDeviceMemoryProperties properties;
-
-    vkGetPhysicalDeviceMemoryProperties(state->physicalDevice, &properties);
-
-    const int32_t bufferLength = 16384;
-
-    const uint32_t bufferSize = sizeof(int32_t) * bufferLength;
-
-    // we are going to need two buffers from this one memory
-    const VkDeviceSize memorySize = bufferSize * 2; 
-
-    // set memoryTypeIndex to an invalid entry in the properties.memoryTypes array
+uint32_t findMemoryType(VkPhysicalDeviceMemoryProperties properties,
+    VkDeviceSize size, uint32_t typeFilter,
+    uint32_t num_flags, const VkMemoryPropertyFlags flags[]){
+    
     uint32_t memoryTypeIndex = VK_MAX_MEMORY_TYPES;
 
     for (uint32_t k = 0; k < properties.memoryTypeCount; k++) {
-      if ((VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT & properties.memoryTypes[k].propertyFlags) &&
-        (VK_MEMORY_PROPERTY_HOST_COHERENT_BIT & properties.memoryTypes[k].propertyFlags) &&
-        (memorySize < properties.memoryHeaps[properties.memoryTypes[k].heapIndex].size)) {
-        memoryTypeIndex = k;
-        break;
-      }
-    }
+        VkMemoryType memoryType = properties.memoryTypes[k];
+        if (checkAll(num_flags, flags, memoryType.propertyFlags) &&
+            (size < properties.memoryHeaps[memoryType.heapIndex].size)) {
 
+            memoryTypeIndex = k;
+            break;
+        }
+    }
     if (memoryTypeIndex == VK_MAX_MEMORY_TYPES){
         RUNTIME_ERROR("Out of host memory error!");
     }
+    return memoryTypeIndex;
+}
+
+VkDeviceMemory allocateMemory(VkAppState state){
+    // Adapted from https://gist.github.com/sheredom/523f02bbad2ae397d7ed255f3f3b5a7f
+    VkDevice device = state->device;
+    VkBuffer buffer = state->computeBuffer;
+
+    VkMemoryRequirements memReq;
+    vkGetBufferMemoryRequirements(device, buffer, &memReq);
+
+    VkPhysicalDeviceMemoryProperties properties;
+    vkGetPhysicalDeviceMemoryProperties(state->physicalDevice, &properties);
+
+    const VkMemoryPropertyFlagBits flags[] = {
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    };
+    uint32_t memoryTypeIndex = findMemoryType(properties, memReq.size,
+        memReq.memoryTypeBits, SIZE(flags), flags);
 
     const VkMemoryAllocateInfo memoryAllocateInfo = {
       .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
       .pNext = 0,
-      .allocationSize = memorySize,
+      .allocationSize = memReq.size,
       .memoryTypeIndex = memoryTypeIndex
     };
 
@@ -244,8 +268,342 @@ VkDeviceMemory allocateMemory(VkAppState state){
     if(vkAllocateMemory(state->device, &memoryAllocateInfo, 0, &memory) != VK_SUCCESS){
         RUNTIME_ERROR("Cannot allocate memory");
     }
+
+    if (vkBindBufferMemory(device, buffer, memory, 0)
+        != VK_SUCCESS){
+        RUNTIME_ERROR("Cannot bind memory to buffer");
+    }
     
     return memory;
+}
+
+// We create a single buffer, and we will manage the offset later.
+// ToRead: https://developer.nvidia.com/vulkan-memory-management
+VkBuffer createBuffer(VkAppState state){
+    VkDevice device = state->device;
+
+    QueueFamilyIndices indices = findQueueFamilies(state->physicalDevice);
+    int indiceList[] = {indices->computeFamily};
+    destroyQueueFamilyIndices(indices);
+
+    const VkBufferCreateInfo bufferCreateInfo = {
+      .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+      .pNext = NULL,
+      .flags = 0,
+      .size  = state->deviceMemorySize,
+      .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+      .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+      .queueFamilyIndexCount = 1,
+      .pQueueFamilyIndices = indiceList
+    };
+
+    VkBuffer buffer;
+    if (vkCreateBuffer(device, &bufferCreateInfo, 0, &buffer)
+        != VK_SUCCESS){
+        RUNTIME_ERROR("Cannot create buffer");
+    }
+
+    return buffer;
+}
+
+void fillMemory(VkAppState state, int32_t *data){
+    VkDevice device = state->device;
+    VkDeviceMemory memory = state->deviceMemory;
+    VkDeviceSize memorySize = state->deviceMemorySize;
+
+    int32_t *payload;
+    if (vkMapMemory(device, memory, 0, memorySize, 0, (void *)&payload)
+        != VK_SUCCESS){
+        RUNTIME_ERROR("Cannot map device memory");
+    }
+
+    for (uint32_t k = 0, e = memorySize / (sizeof(uint32_t));
+        k < e; k++){
+        payload[k] = 41;
+    }
+    // if (memcpy(payload, data, memorySize)
+    //     == NULL){
+    //    RUNTIME_ERROR("Cannot copy data to GPU memory");
+    //}
+    vkUnmapMemory(device, memory);
+}
+
+VkShaderModule createShaderModule(VkAppState state, FileContents shader) {
+    VkDevice device = state->device;
+    VkShaderModuleCreateInfo createInfo = {};
+    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    createInfo.codeSize = shader->size;
+    createInfo.pCode = (const uint32_t*)shader->code;
+
+    VkShaderModule shaderModule;
+    if (vkCreateShaderModule(device, &createInfo, NULL, &shaderModule)
+        != VK_SUCCESS) {
+
+        RUNTIME_ERROR("failed to create shader module!");
+    }
+    return shaderModule;
+}
+
+VkDescriptorSetLayout createDescriptorSetLayout(VkAppState state){
+    VkDevice device = state->device;
+    // XXX: hardcoded two descriptor set layouts (i.e. two "locations" in shader)
+    VkDescriptorSetLayoutBinding descriptorSetLayoutBindings[2] = {
+      {
+        .binding = 0,
+        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .descriptorCount = 1,
+        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+        .pImmutableSamplers = NULL
+      },
+       {
+        .binding = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .descriptorCount = 1,
+        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+        .pImmutableSamplers = NULL
+      }
+    };
+
+    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo = {
+      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      .pNext = NULL,
+      .flags = 0,
+      .bindingCount = 2,
+      .pBindings = descriptorSetLayoutBindings
+    };
+
+    VkDescriptorSetLayout descriptorSetLayout;
+    if (vkCreateDescriptorSetLayout(device, &descriptorSetLayoutCreateInfo,
+        0, &descriptorSetLayout) != VK_SUCCESS){
+        RUNTIME_ERROR("Cannot create descriptor set layout");
+    }
+    
+    return descriptorSetLayout;
+}
+
+VkPipelineLayout createPipelineLayout(VkAppState state){
+    VkDevice device = state->device;
+    VkDescriptorSetLayout descriptorSetLayout = state->descriptorSetLayout;
+    
+    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {
+      .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+      .pNext = NULL,
+      .flags = 0,
+      .setLayoutCount = 1,
+      .pSetLayouts = &descriptorSetLayout,
+      .pushConstantRangeCount = 0,
+      .pPushConstantRanges = NULL
+    };
+
+    VkPipelineLayout pipelineLayout;
+    if (vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, 0, &pipelineLayout)
+        != VK_SUCCESS){
+        RUNTIME_ERROR("Cannot create pipeline layout");
+    }
+
+    return pipelineLayout;
+}
+
+VkPipeline createComputePipeline(VkAppState state){
+    VkDevice device = state->device;
+    VkPipelineLayout pipelineLayout = state->pipelineLayout;
+    // XXX: Shader hardcoded
+    FileContents shader = readFile("shaders/copyShader.spv");
+
+    VkShaderModule module = createShaderModule(state, shader);
+
+    VkComputePipelineCreateInfo computePipelineCreateInfo = {
+      .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+      .pNext = NULL,
+      .flags = 0,
+      .stage = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+        .module = module,
+        .pName = "main", // XXX: Hardcoded name
+        .pSpecializationInfo = NULL
+      },
+      .layout = pipelineLayout,
+      .basePipelineHandle = VK_NULL_HANDLE,
+      .basePipelineIndex = 0
+    };
+
+    VkPipeline pipeline;
+    if (vkCreateComputePipelines(device, 0, 1, &computePipelineCreateInfo,
+        0, &pipeline) != VK_SUCCESS){
+        RUNTIME_ERROR("Cannot create compute pipeline");
+    }
+    
+    destroyFileContents(shader);
+    vkDestroyShaderModule(device, module, NULL);
+    return pipeline;
+}
+
+VkDescriptorPool createDescriptorPool(VkAppState state){
+    VkDevice device = state->device;
+
+    VkDescriptorPoolSize descriptorPoolSize = {
+        .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .descriptorCount = 2
+    };
+
+    VkDescriptorPoolCreateInfo descriptorPoolCreateInfo = {
+      .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+      .pNext = NULL,
+      .flags = 0,
+      .maxSets = 1,
+      .poolSizeCount = 1,
+      .pPoolSizes = &descriptorPoolSize
+    };
+
+    VkDescriptorPool descriptorPool;
+    if (vkCreateDescriptorPool(device, &descriptorPoolCreateInfo,
+        0, &descriptorPool) != VK_SUCCESS){
+        RUNTIME_ERROR("Cannot create descriptor pool");
+    }
+    return descriptorPool;
+}
+
+VkDescriptorSet createDescriptorSet(VkAppState state){
+    VkDevice device = state->device;
+    VkDescriptorSetLayout descriptorSetLayout = state->descriptorSetLayout;
+    VkDescriptorPool descriptorPool = state->descriptorPool;
+    VkBuffer buffer = state->computeBuffer;
+
+
+    VkDescriptorSetAllocateInfo descriptorSetAllocateInfo = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .pNext = NULL,
+        .descriptorPool = descriptorPool,
+        .descriptorSetCount = 1,
+        .pSetLayouts = &descriptorSetLayout
+    };
+
+    VkDescriptorSet descriptorSet;
+    if (vkAllocateDescriptorSets(device, &descriptorSetAllocateInfo,
+        &descriptorSet) != VK_SUCCESS){
+        RUNTIME_ERROR("Cannot allocate descriptor sets");
+    }
+    
+    // XXX: hardcoded offsets and ranges: two layouts, input and output
+    VkDescriptorBufferInfo in_descriptorBufferInfo = {
+      .buffer = buffer,
+      .offset = 0,
+      .range = state->deviceMemorySize/2
+    };
+
+    VkDescriptorBufferInfo out_descriptorBufferInfo = {
+      .buffer = buffer,
+      .offset = state->deviceMemorySize/2,
+      .range = VK_WHOLE_SIZE
+    };
+
+    VkWriteDescriptorSet writeDescriptorSet[2] = {
+      {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .pNext = NULL,
+        .dstSet = descriptorSet,
+        .dstBinding = 0,
+        .dstArrayElement = 0,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .pImageInfo = NULL,
+        .pBufferInfo = &in_descriptorBufferInfo,
+        .pTexelBufferView = NULL
+      },
+      {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .pNext = NULL,
+        .dstSet = descriptorSet,
+        .dstBinding = 1,
+        .dstArrayElement = 0,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .pImageInfo = NULL,
+        .pBufferInfo = &out_descriptorBufferInfo,
+        .pTexelBufferView = NULL
+      }
+    };
+
+    vkUpdateDescriptorSets(device, 2, writeDescriptorSet, 0, 0);
+    return descriptorSet;
+}
+
+VkCommandPool createCommandPool(VkAppState state){
+    VkDevice device = state->device;
+
+    // XXX: keep index somewhere
+    QueueFamilyIndices indices = findQueueFamilies(state->physicalDevice);
+    int queueFamilyIndex = indices->computeFamily;
+    destroyQueueFamilyIndices(indices);
+
+    VkCommandPoolCreateInfo commandPoolCreateInfo = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .queueFamilyIndex = queueFamilyIndex
+    };
+
+    VkCommandPool commandPool;
+    if (vkCreateCommandPool(device, &commandPoolCreateInfo, 0, &commandPool)
+        != VK_SUCCESS){
+        RUNTIME_ERROR("Cannot create command pool");
+    }
+
+    return commandPool;
+}
+
+VkCommandBuffer createCommandBuffer(VkAppState state){
+    VkCommandPool commandPool = state->commandPool;
+
+    VkCommandBufferAllocateInfo commandBufferAllocateInfo = {
+      .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+      .pNext = NULL,
+      .commandPool = commandPool,
+      .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+      .commandBufferCount = 1
+    };
+
+    VkDevice device = state->device;
+
+    VkCommandBuffer commandBuffer;
+    if (vkAllocateCommandBuffers(device, &commandBufferAllocateInfo, &commandBuffer)
+        != VK_SUCCESS) {
+        RUNTIME_ERROR("Cannot allocate command buffer");
+    }
+
+    VkCommandBufferBeginInfo commandBufferBeginInfo = {
+      .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+      .pNext = NULL,
+      .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+      .pInheritanceInfo = NULL
+    };
+
+    if (vkBeginCommandBuffer(commandBuffer, &commandBufferBeginInfo)
+        != VK_SUCCESS){
+        RUNTIME_ERROR("Cannot begin command buffer");
+    }
+
+    VkPipeline pipeline = state->computePipeline;
+
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+
+    VkPipelineLayout pipelineLayout = state->pipelineLayout;
+    VkDescriptorSet descriptorSet = state->descriptorSet;
+
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+      pipelineLayout, 0, 1, &descriptorSet, 0, 0);
+
+    VkDeviceSize bufferSize = state->deviceMemorySize;
+
+    vkCmdDispatch(commandBuffer, bufferSize / sizeof(int32_t), 1, 1);
+
+    if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS){
+        RUNTIME_ERROR("Cannot end command buffer");
+    }
+    return commandBuffer;
 }
 
 VkAppState initVulkan(ExtensionInfo * requiredExtensions){
@@ -269,10 +627,63 @@ VkAppState initVulkan(ExtensionInfo * requiredExtensions){
     VkQueue queue = getDeviceQueue(state);
     state->computeQueue = queue;
 
+    // XXX: Hardcoded buffer length + memory size
+    const int32_t bufferLength = 16384;
+    const uint32_t bufferSize = sizeof(int32_t) * bufferLength;
+    const VkDeviceSize memorySize = bufferSize * 2;
+    state->deviceMemorySize = memorySize;
+
+    VkBuffer computeBuffer = createBuffer(state);
+    state->computeBuffer = computeBuffer;
+
+    VkDeviceMemory deviceMemory = allocateMemory(state);
+    state->deviceMemory = deviceMemory;
+    
+    // XXX: hardcoded fill device memory with stuff
+    int32_t *payload = (int32_t *) malloc(bufferLength * 2 * sizeof(int32_t));
+    for (int32_t i = 0; i < bufferLength * 2; i++){
+        payload[i] = 41;
+    }
+    fillMemory(state, payload);
+    free(payload);
+
+    VkDescriptorSetLayout descriptorSetLayout =
+        createDescriptorSetLayout(state);
+    state->descriptorSetLayout = descriptorSetLayout;
+
+    VkPipelineLayout pipelineLayout =
+        createPipelineLayout(state);
+    state->pipelineLayout = pipelineLayout;
+
+    VkPipeline computePipeline = createComputePipeline(state);
+    state->computePipeline = computePipeline;
+
+    VkDescriptorPool descriptorPool = createDescriptorPool(state);
+    state->descriptorPool = descriptorPool;
+
+    VkDescriptorSet descriptorSet = createDescriptorSet(state);
+    state->descriptorSet = descriptorSet;
+
+    VkCommandPool commandPool = createCommandPool(state);
+    state->commandPool = commandPool;
+
+    VkCommandBuffer commandBuffer = createCommandBuffer(state);
+    state->commandBuffer = commandBuffer;
+
     return state;
 }
 
 void cleanup (VkAppState state) {
+    
+    vkDestroyCommandPool(state->device, state->commandPool, NULL);
+    vkDestroyDescriptorPool(state->device, state->descriptorPool, NULL);
+    vkDestroyDescriptorSetLayout(state->device,
+        state->descriptorSetLayout, NULL);
+    vkDestroyPipelineLayout(state->device, state->pipelineLayout, NULL);
+    vkDestroyPipeline(state->device, state->computePipeline, NULL);
+    vkDestroyBuffer(state->device, state->computeBuffer, NULL);
+    vkFreeMemory(state->device, state->deviceMemory, NULL);
+
     if (enableValidationLayers){
         DestroyDebugUtilsMessengerEXT(state->instance, state->callback, NULL);
     }
@@ -286,6 +697,45 @@ int main(int main, char **argv){
     PRINT_LIST(stdout, "Requesting extensions: ", extensions->count, extensions->names);
 
     VkAppState state = initVulkan(extensions);
+
+    // We now have a queue in state, and everything set up to submit a command to the queue
+
+    VkSubmitInfo submitInfo = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .pNext = NULL, 
+        .waitSemaphoreCount = 0,
+        .pWaitSemaphores = NULL,
+        .pWaitDstStageMask = NULL,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &state->commandBuffer,
+        .signalSemaphoreCount = 0,
+        .pSignalSemaphores = NULL
+    };
+    
+    if (vkQueueSubmit(state->computeQueue, 1, &submitInfo, 0) != VK_SUCCESS){
+        RUNTIME_ERROR("Cannot submit to compute queue");
+    }
+
+    if (vkQueueWaitIdle(state->computeQueue) != VK_SUCCESS){
+        RUNTIME_ERROR("Error waiting for computeQueue");
+    }
+
+    int32_t * payload;
+    if (vkMapMemory(state->device, state->deviceMemory, 0,
+        state->deviceMemorySize, 0, (void *)&payload) != VK_SUCCESS){
+        RUNTIME_ERROR("Error retrieving result");
+    }
+    
+    for (uint32_t k = 0, e = state->deviceMemorySize / (2 * sizeof(uint32_t));
+        k < e; k++){
+        
+        fprintf(stdout, "payload[%d] = %d \t payload[%d] = %d\n", k, payload[k], k+e, payload[k+e]);
+    }
+
+    vkUnmapMemory(state->device, state->deviceMemory);
+
+    // End computation
+
     cleanExtensionList(extensions);
 
     cleanup(state);
