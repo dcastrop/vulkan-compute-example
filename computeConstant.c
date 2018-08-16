@@ -408,7 +408,7 @@ VkPipeline createComputePipeline(VkAppState state){
     VkDevice device = state->device;
     VkPipelineLayout pipelineLayout = state->pipelineLayout;
     // XXX: Shader hardcoded
-    FileContents shader = readFile("shaders/copyShader.spv");
+    FileContents shader = readFile("shaders/copyShader.comp.spv");
 
     VkShaderModule module = createShaderModule(state, shader);
 

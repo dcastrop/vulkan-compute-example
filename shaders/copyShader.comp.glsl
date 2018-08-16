@@ -13,6 +13,6 @@ layout(binding = 1, std430) buffer out_b
 
 void main()
 {
-    lay1.b[gl_GlobalInvocationID.x] = 2 * lay0.b[gl_GlobalInvocationID.x];
+    lay1.b[gl_GlobalInvocationID.x] = 1 + lay0.b[gl_GlobalInvocationID.x];
 }
 

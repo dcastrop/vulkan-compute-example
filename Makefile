@@ -1,14 +1,15 @@
 VULKAN_SDK_PATH = /home/dcastrop/Vulkan/1.1.82.0/x86_64
-CFLAGS = -I$(VULKAN_SDK_PATH)/include
+INCLUDE_DIR = ./include
+CFLAGS = -I$(VULKAN_SDK_PATH)/include -I$(INCLUDE_DIR)
 LDFLAGS = -L$(VULKAN_SDK_PATH)/lib `pkg-config --static --libs glfw3` -lvulkan
 
-computeConstant: computeConstant.c computeConstant.h utils.h fileContents.h shaders/copyShader.spv
+computeConstant: computeConstant.c shaders/copyShader.comp.spv
 	gcc $(CFLAGS) -o computeConstant computeConstant.c $(LDFLAGS)
 
-shaders/copyShader.spv: shaders/copyShader.comp
-	glslangValidator -V shaders/copyShader.comp -o shaders/copyShader.spv
+%.spv: %.glsl
+	glslangValidator -V $< -o $@
 
-nodebug: computeConstant.c computeConstant.h shaders/vert.spv shaders/frag.spv
+nodebug: computeConstant.c shaders/copyShader.comp.spv
 	gcc $(CFLAGS) -o computeConstant -DNDEBUG computeConstant.c $(LDFLAGS)
 
 .PHONY: test clean
