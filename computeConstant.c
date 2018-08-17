@@ -169,7 +169,63 @@ VkDevice createLogicalDevice(VkAppState state) {
         queueCreateInfos[i] = queueCreateInfo;
     }
 
-    const VkPhysicalDeviceFeatures deviceFeatures = {};
+    const VkPhysicalDeviceFeatures deviceFeatures = {
+        .robustBufferAccess = VK_FALSE,
+        .fullDrawIndexUint32 = VK_FALSE,
+        .imageCubeArray = VK_FALSE,
+        .independentBlend = VK_FALSE,
+        .geometryShader = VK_FALSE,
+        .tessellationShader = VK_FALSE,
+        .sampleRateShading = VK_FALSE,
+        .dualSrcBlend = VK_FALSE,
+        .logicOp = VK_FALSE,
+        .multiDrawIndirect = VK_FALSE,
+        .drawIndirectFirstInstance = VK_FALSE,
+        .depthClamp = VK_FALSE,
+        .depthBiasClamp = VK_FALSE,
+        .fillModeNonSolid = VK_FALSE,
+        .depthBounds = VK_FALSE,
+        .wideLines = VK_FALSE,
+        .largePoints = VK_FALSE,
+        .alphaToOne = VK_FALSE,
+        .multiViewport = VK_FALSE,
+        .samplerAnisotropy = VK_FALSE,
+        .textureCompressionETC2 = VK_FALSE,
+        .textureCompressionASTC_LDR = VK_FALSE,
+        .textureCompressionBC = VK_FALSE,
+        .occlusionQueryPrecise = VK_FALSE,
+        .pipelineStatisticsQuery = VK_FALSE,
+        .vertexPipelineStoresAndAtomics = VK_FALSE,
+        .fragmentStoresAndAtomics = VK_FALSE,
+        .shaderTessellationAndGeometryPointSize = VK_FALSE,
+        .shaderImageGatherExtended = VK_FALSE,
+        .shaderStorageImageExtendedFormats = VK_FALSE,
+        .shaderStorageImageMultisample = VK_FALSE,
+        .shaderStorageImageReadWithoutFormat = VK_FALSE,
+        .shaderStorageImageWriteWithoutFormat = VK_FALSE,
+        .shaderUniformBufferArrayDynamicIndexing = VK_FALSE,
+        .shaderSampledImageArrayDynamicIndexing = VK_FALSE,
+        .shaderStorageBufferArrayDynamicIndexing = VK_FALSE,
+        .shaderStorageImageArrayDynamicIndexing = VK_FALSE,
+        .shaderClipDistance = VK_FALSE,
+        .shaderCullDistance = VK_FALSE,
+        .shaderFloat64 = VK_FALSE,
+        .shaderInt64 = VK_FALSE,
+        .shaderInt16 = VK_FALSE,
+        .shaderResourceResidency = VK_FALSE,
+        .shaderResourceMinLod = VK_FALSE,
+        .sparseBinding = VK_FALSE,
+        .sparseResidencyBuffer = VK_FALSE,
+        .sparseResidencyImage2D = VK_FALSE,
+        .sparseResidencyImage3D = VK_FALSE,
+        .sparseResidency2Samples = VK_FALSE,
+        .sparseResidency4Samples = VK_FALSE,
+        .sparseResidency8Samples = VK_FALSE,
+        .sparseResidency16Samples = VK_FALSE,
+        .sparseResidencyAliased = VK_FALSE,
+        .variableMultisampleRate = VK_FALSE,
+        .inheritedQueries = VK_FALSE,
+    };
 
     uint32_t enabledLayerCount = 0;
     const char * const * ppEnabledLayerNames = NULL;
@@ -317,23 +373,22 @@ void fillMemory(VkAppState state, int32_t *data){
         RUNTIME_ERROR("Cannot map device memory");
     }
 
-    for (uint32_t k = 0, e = memorySize / (sizeof(uint32_t));
-        k < e; k++){
-        payload[k] = 41;
+    if (memcpy(payload, data, memorySize)
+         == NULL){
+        RUNTIME_ERROR("Cannot copy data to GPU memory");
     }
-    // if (memcpy(payload, data, memorySize)
-    //     == NULL){
-    //    RUNTIME_ERROR("Cannot copy data to GPU memory");
-    //}
     vkUnmapMemory(device, memory);
 }
 
 VkShaderModule createShaderModule(VkAppState state, FileContents shader) {
     VkDevice device = state->device;
-    VkShaderModuleCreateInfo createInfo = {};
-    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    createInfo.codeSize = shader->size;
-    createInfo.pCode = (const uint32_t*)shader->code;
+    VkShaderModuleCreateInfo createInfo = {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .pNext = NULL,
+        .flags = 0,
+        .codeSize = shader->size,
+        .pCode = (const uint32_t*)shader->code,
+    };
 
     VkShaderModule shaderModule;
     if (vkCreateShaderModule(device, &createInfo, NULL, &shaderModule)
@@ -674,7 +729,7 @@ VkAppState initVulkan(ExtensionInfo * requiredExtensions){
 }
 
 void cleanup (VkAppState state) {
-    
+    vkFreeCommandBuffers(state->device, state->commandPool, 1, &state->commandBuffer);
     vkDestroyCommandPool(state->device, state->commandPool, NULL);
     vkDestroyDescriptorPool(state->device, state->descriptorPool, NULL);
     vkDestroyDescriptorSetLayout(state->device,

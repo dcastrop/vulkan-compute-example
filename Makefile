@@ -12,7 +12,10 @@ computeConstant: computeConstant.c shaders/copyShader.comp.spv
 nodebug: computeConstant.c shaders/copyShader.comp.spv
 	gcc $(CFLAGS) -o computeConstant -DNDEBUG computeConstant.c $(LDFLAGS)
 
-.PHONY: test clean
+.PHONY: test clean valgrind
+
+valgrind: computeConstant valgrind/valgrind.supp
+	valgrind --suppressions=valgrind/valgrind.supp --leak-check=full ./computeConstant > /dev/null
 
 test: computeConstant
 	./computeConstant
