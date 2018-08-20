@@ -3,6 +3,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdint.h>
 
 #define RUNTIME_ERROR(s)                    \
     {                                       \

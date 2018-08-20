@@ -1,6 +1,6 @@
 #include <vulkan/vulkan.h>
 
-#include "computeConstant.h"
+#include "vulkan_defns.h"
 #include "fileContents.h"
 #include "utils.h"
 
@@ -463,7 +463,7 @@ VkPipeline createComputePipeline(VkAppState state){
     VkDevice device = state->device;
     VkPipelineLayout pipelineLayout = state->pipelineLayout;
     // XXX: Shader hardcoded
-    FileContents shader = readFile("shaders/copyShader.comp.spv");
+    FileContents shader = readFile("../shaders/copyShader.comp.spv");
 
     VkShaderModule module = createShaderModule(state, shader);
 
