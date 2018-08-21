@@ -655,10 +655,11 @@ VkCommandBuffer createCommandBuffer(VkAppState state){
 
     uint32_t num_ws = bufferSize / sizeof(int32_t);
 
-    while (num_ws > 1) {
-        vkCmdDispatch(commandBuffer, num_ws, 1, 1);
-        num_ws = num_ws / 2;
-    }
+//   while (num_ws > 1) { // <<---- THIS was very stupid: 
+    fprintf(stdout, "Dispatching: %d", num_ws);
+    vkCmdDispatch(commandBuffer, num_ws, 1, 1);
+    num_ws = num_ws / 2;
+//    }
 
     if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS){
         RUNTIME_ERROR("Cannot end command buffer");
@@ -787,7 +788,11 @@ int main(int main, char **argv){
         RUNTIME_ERROR("Error mapping memory");
     }
 
+// FIXME: Many issues below:
     while (num_ws > 1) {
+        // XXX: From Vulkan specification: vkQueueSubmit is very expensive: I should batch
+        // all the work together!
+        // Moreover, I want to avoid memcpy. I need another way to synchronise kernel execution
         if (vkQueueSubmit(state->computeQueue, 1, &submitInfo, 0) != VK_SUCCESS){
             RUNTIME_ERROR("Cannot submit to compute queue");
         }
