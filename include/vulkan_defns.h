@@ -199,7 +199,7 @@ typedef struct VAppState {
     VkPipelineLayout pipelineLayout;
     VkPipeline computePipeline;
     VkDescriptorPool descriptorPool;
-    VkDescriptorSet descriptorSet;
+    VkDescriptorSet * descriptorSet;
     VkCommandPool commandPool;
     VkCommandBuffer commandBuffer;
 } VkAppState_T;

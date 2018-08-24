@@ -501,14 +501,14 @@ VkDescriptorPool createDescriptorPool(VkAppState state){
 
     VkDescriptorPoolSize descriptorPoolSize = {
         .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        .descriptorCount = 2
+        .descriptorCount = 4
     };
 
     VkDescriptorPoolCreateInfo descriptorPoolCreateInfo = {
       .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
       .pNext = NULL,
       .flags = 0,
-      .maxSets = 1,
+      .maxSets = 2,
       .poolSizeCount = 1,
       .pPoolSizes = &descriptorPoolSize
     };
@@ -521,7 +521,7 @@ VkDescriptorPool createDescriptorPool(VkAppState state){
     return descriptorPool;
 }
 
-VkDescriptorSet createDescriptorSet(VkAppState state){
+VkDescriptorSet * createDescriptorSet(VkAppState state){
     VkDevice device = state->device;
     VkDescriptorSetLayout descriptorSetLayout = state->descriptorSetLayout;
     VkDescriptorPool descriptorPool = state->descriptorPool;
@@ -536,9 +536,17 @@ VkDescriptorSet createDescriptorSet(VkAppState state){
         .pSetLayouts = &descriptorSetLayout
     };
 
-    VkDescriptorSet descriptorSet;
+    // We allocate two descriptor sets with input/output descriptor
+    // sets switched (ping-pong input/output buffers)
+    VkDescriptorSet * descriptorSet =
+        (VkDescriptorSet *)malloc(2 * sizeof(VkDescriptorSet));
     if (vkAllocateDescriptorSets(device, &descriptorSetAllocateInfo,
-        &descriptorSet) != VK_SUCCESS){
+        &descriptorSet[0]) != VK_SUCCESS){
+        RUNTIME_ERROR("Cannot allocate descriptor sets");
+    }
+    VkDescriptorSet descriptorSet_out;
+    if (vkAllocateDescriptorSets(device, &descriptorSetAllocateInfo,
+        &descriptorSet[1]) != VK_SUCCESS){
         RUNTIME_ERROR("Cannot allocate descriptor sets");
     }
     
@@ -555,11 +563,11 @@ VkDescriptorSet createDescriptorSet(VkAppState state){
       .range = VK_WHOLE_SIZE
     };
 
-    VkWriteDescriptorSet writeDescriptorSet[2] = {
+    VkWriteDescriptorSet writeDescriptorSet[4] = {
       {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
         .pNext = NULL,
-        .dstSet = descriptorSet,
+        .dstSet = descriptorSet[0],
         .dstBinding = 0,
         .dstArrayElement = 0,
         .descriptorCount = 1,
@@ -571,7 +579,7 @@ VkDescriptorSet createDescriptorSet(VkAppState state){
       {
         .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
         .pNext = NULL,
-        .dstSet = descriptorSet,
+        .dstSet = descriptorSet[0],
         .dstBinding = 1,
         .dstArrayElement = 0,
         .descriptorCount = 1,
@@ -579,10 +587,34 @@ VkDescriptorSet createDescriptorSet(VkAppState state){
         .pImageInfo = NULL,
         .pBufferInfo = &out_descriptorBufferInfo,
         .pTexelBufferView = NULL
-      }
+      },
+      {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .pNext = NULL,
+        .dstSet = descriptorSet[1],
+        .dstBinding = 0,
+        .dstArrayElement = 0,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .pImageInfo = NULL,
+        .pBufferInfo = &out_descriptorBufferInfo,
+        .pTexelBufferView = NULL
+      },
+      {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .pNext = NULL,
+        .dstSet = descriptorSet[1],
+        .dstBinding = 1,
+        .dstArrayElement = 0,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .pImageInfo = NULL,
+        .pBufferInfo = &in_descriptorBufferInfo,
+        .pTexelBufferView = NULL
+      },
     };
 
-    vkUpdateDescriptorSets(device, 2, writeDescriptorSet, 0, 0);
+    vkUpdateDescriptorSets(device, 4, writeDescriptorSet, 0, 0);
     return descriptorSet;
 }
 
@@ -646,20 +678,20 @@ VkCommandBuffer createCommandBuffer(VkAppState state){
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
 
     VkPipelineLayout pipelineLayout = state->pipelineLayout;
-    VkDescriptorSet descriptorSet = state->descriptorSet;
-
-    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-      pipelineLayout, 0, 1, &descriptorSet, 0, 0);
+    VkDescriptorSet * descriptorSet = state->descriptorSet;
 
     VkDeviceSize bufferSize = state->deviceMemorySize / 2;
-
     uint32_t num_ws = bufferSize / sizeof(int32_t);
+    uint32_t turn = 1;
+    while (num_ws > 1) { 
+        turn = 1 - turn;
 
-//   while (num_ws > 1) { // <<---- THIS was very stupid: 
-    fprintf(stdout, "Dispatching: %d", num_ws);
-    vkCmdDispatch(commandBuffer, num_ws, 1, 1);
-    num_ws = num_ws / 2;
-//    }
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+            pipelineLayout, 0, 1, &descriptorSet[turn], 0, 0);
+
+        vkCmdDispatch(commandBuffer, num_ws, 1, 1);
+        num_ws = num_ws / 2;
+    }
 
     if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS){
         RUNTIME_ERROR("Cannot end command buffer");
@@ -728,7 +760,7 @@ VkAppState initVulkan(ExtensionInfo * requiredExtensions){
     VkDescriptorPool descriptorPool = createDescriptorPool(state);
     state->descriptorPool = descriptorPool;
 
-    VkDescriptorSet descriptorSet = createDescriptorSet(state);
+    VkDescriptorSet * descriptorSet = createDescriptorSet(state);
     state->descriptorSet = descriptorSet;
 
     VkCommandPool commandPool = createCommandPool(state);
@@ -746,6 +778,7 @@ void cleanup (VkAppState state) {
     vkDestroyDescriptorPool(state->device, state->descriptorPool, NULL);
     vkDestroyDescriptorSetLayout(state->device,
         state->descriptorSetLayout, NULL);
+    free(state->descriptorSet);
     vkDestroyPipelineLayout(state->device, state->pipelineLayout, NULL);
     vkDestroyPipeline(state->device, state->computePipeline, NULL);
     vkDestroyBuffer(state->device, state->computeBuffer, NULL);
@@ -788,20 +821,11 @@ int main(int main, char **argv){
         RUNTIME_ERROR("Error mapping memory");
     }
 
-// FIXME: Many issues below:
-    while (num_ws > 1) {
-        // XXX: From Vulkan specification: vkQueueSubmit is very expensive: I should batch
-        // all the work together!
-        // Moreover, I want to avoid memcpy. I need another way to synchronise kernel execution
-        if (vkQueueSubmit(state->computeQueue, 1, &submitInfo, 0) != VK_SUCCESS){
-            RUNTIME_ERROR("Cannot submit to compute queue");
-        }
-        if (vkQueueWaitIdle(state->computeQueue) != VK_SUCCESS){
-            RUNTIME_ERROR("Error waiting for computeQueue");
-        }
-        memcpy((void *)payload, (const void *)payload+mem_size, mem_size);
-        memset((void *)payload+mem_size, 0, mem_size);
-        num_ws = num_ws / 2;
+    if (vkQueueSubmit(state->computeQueue, 1, &submitInfo, 0) != VK_SUCCESS){
+        RUNTIME_ERROR("Cannot submit to compute queue");
+    }
+    if (vkQueueWaitIdle(state->computeQueue) != VK_SUCCESS){
+        RUNTIME_ERROR("Error waiting for computeQueue");
     }
 
     fprintf(stdout, "result = %d\n", payload[0]);
