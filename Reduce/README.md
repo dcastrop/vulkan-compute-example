@@ -8,5 +8,5 @@ single one and use the offsets in VkDescriptorBufferInfo.
 
 ## Issues (Fixed by ping-pong-ing input/output buffers):
 
--[x] Careless use of vkQueueSubmit: should batch log(N) commands, and submit once
--[x] Avoid the use of memcpy to set the input data for each iteration
+- [x] Careless use of vkQueueSubmit: should batch log(N) commands, and submit once
+- [x] Avoid the use of memcpy to set the input data for each iteration
