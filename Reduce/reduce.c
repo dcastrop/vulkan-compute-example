@@ -822,7 +822,8 @@ int main(int main, char **argv){
         RUNTIME_ERROR("Error mapping memory");
     }
 
-    if (vkQueueSubmit(state->computeQueue, 1, &submitInfo, 0) != VK_SUCCESS){
+    if (vkQueueSubmit(state->computeQueue, 1, &submitInfo, NULL)
+        != VK_SUCCESS){
         RUNTIME_ERROR("Cannot submit to compute queue");
     }
     if (vkQueueWaitIdle(state->computeQueue) != VK_SUCCESS){
