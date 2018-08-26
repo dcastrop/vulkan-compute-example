@@ -265,24 +265,14 @@ VkQueue getDeviceQueue(VkAppState state){
     return computeQueue;
 }
 
-uint32_t checkAll(uint32_t num_flags, const VkMemoryPropertyFlags flagList[],
-    VkMemoryPropertyFlags flags){
-    uint32_t res = 1;
-    for (uint32_t k = 0; k < num_flags; k++){
-        res = res && (flagList[k] & flags); 
-    }
-    return res;
-}
-
 uint32_t findMemoryType(VkPhysicalDeviceMemoryProperties properties,
-    VkDeviceSize size, uint32_t typeFilter,
-    uint32_t num_flags, const VkMemoryPropertyFlags flags[]){
+    VkDeviceSize size, uint32_t typeFilter, VkMemoryPropertyFlags flags){
     
     uint32_t memoryTypeIndex = VK_MAX_MEMORY_TYPES;
 
     for (uint32_t k = 0; k < properties.memoryTypeCount; k++) {
         VkMemoryType memoryType = properties.memoryTypes[k];
-        if (checkAll(num_flags, flags, memoryType.propertyFlags) &&
+        if (((flags & memoryType.propertyFlags) == flags) &&
             (size < properties.memoryHeaps[memoryType.heapIndex].size)) {
 
             memoryTypeIndex = k;
@@ -306,12 +296,10 @@ VkDeviceMemory allocateMemory(VkAppState state){
     VkPhysicalDeviceMemoryProperties properties;
     vkGetPhysicalDeviceMemoryProperties(state->physicalDevice, &properties);
 
-    const VkMemoryPropertyFlagBits flags[] = {
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+    uint32_t memoryTypeIndex =
+        findMemoryType(properties, memReq.size, memReq.memoryTypeBits,
         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
-    };
-    uint32_t memoryTypeIndex = findMemoryType(properties, memReq.size,
-        memReq.memoryTypeBits, SIZE(flags), flags);
+        | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
 
     const VkMemoryAllocateInfo memoryAllocateInfo = {
       .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
@@ -681,9 +669,17 @@ VkCommandBuffer createCommandBuffer(VkAppState state){
     VkDescriptorSet * descriptorSet = state->descriptorSet;
 
     VkDeviceSize bufferSize = state->deviceMemorySize / 2;
-    uint32_t num_ws = bufferSize / sizeof(int32_t);
+    uint32_t num_ws = bufferSize / (2 * sizeof(int32_t));
     uint32_t turn = 1;
-    while (num_ws > 1) { 
+
+    VkMemoryBarrier memoryBarrier = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+        .pNext = NULL,
+        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT
+    };
+
+    while (num_ws > 0) { 
         turn = 1 - turn;
 
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -691,6 +687,11 @@ VkCommandBuffer createCommandBuffer(VkAppState state){
 
         vkCmdDispatch(commandBuffer, num_ws, 1, 1);
         num_ws = num_ws / 2;
+
+        vkCmdPipelineBarrier(commandBuffer,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            0, 1, &memoryBarrier, 0, NULL, 0, NULL);
     }
 
     if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS){
